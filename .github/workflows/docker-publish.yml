@@ -1,33 +1,41 @@
-name: Build and Push to Docker Hub
+name: Build and Deploy RAG Project
 
 on:
   push:
-    branches:
-      - main  # Runs every time you push to the main branch
+    branches: [ "main" ] # Triggers whenever you push to main
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4 #
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v3 #
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          password: ${{ secrets.DOCKER_PASSWORD }} # Use your Personal Access Token here
 
-      - name: Build and Push Frontend (v2)
-        uses: docker/build-push-action@v5 #
-        with:
-          context: ./frontend
-          push: true
-          tags: ${{ secrets.DOCKER_USERNAME }}/nextwork-rag-frontend:v2
-
-      - name: Build and Push Backend (v1)
+      # --- BACKEND SECTION ---
+      - name: Build and Push Backend
         uses: docker/build-push-action@v5
         with:
-          context: ./backend
+          context: ./backend # Looks inside your backend folder
           push: true
-          tags: ${{ secrets.DOCKER_USERNAME }}/nextwork-rag-backend:v1
+          tags: ${{ secrets.DOCKER_USERNAME }}/nextwork-rag-backend:latest
+
+      # --- FRONTEND SECTION ---
+      - name: Build and Push Frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend # Looks inside your frontend folder
+          push: true
+          tags: ${{ secrets.DOCKER_USERNAME }}/nextwork-rag-frontend:latest
+
+      # --- DEPLOYMENT SECTION ---
+      - name: Trigger Backend Render Deploy
+        run: curl "${{ secrets.RENDER_BACKEND_DEPLOY_HOOK }}"
+
+      - name: Trigger Frontend Render Deploy
+        run: curl "${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK }}"
