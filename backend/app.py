@@ -86,4 +86,8 @@ def query_knowledge(q: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # 1. Get the PORT from Render's environment, defaulting to 8000 for local testing
+    port = int(os.environ.get("PORT", 8000))
+    
+    # 2. Run uvicorn using the dynamic port
+    uvicorn.run(app, host="0.0.0.0", port=port)
