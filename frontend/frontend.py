@@ -1,5 +1,7 @@
 import streamlit as st
 import requests
+import os
+
 
 # 1. Setup the page
 st.set_page_config(page_title="RAG AI Assistant", page_icon="🤖")
@@ -7,7 +9,7 @@ st.title("🤖 My RAG Knowledge Base")
 
 # Define the API endpoints
 # Change from http://127.0.0.1:8000 to the Docker service name
-API_URL = "http://backend:8000/query"
+API_URL = os.getenv("API_URL", "http://localhost:8000")
 QUERY_URL = f"{API_URL}/query"
 ADD_URL = f"{API_URL}/add"
 

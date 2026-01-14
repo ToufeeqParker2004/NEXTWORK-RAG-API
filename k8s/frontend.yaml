@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nextwork-rag-frontend
+  labels:
+    app: rag-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rag-frontend
+  template:
+    metadata:
+      labels:
+        app: rag-frontend
+    spec:
+      containers:
+      - name: frontend
+        image: toufeeqparker2004/nextwork-rag-frontend:v2
+        ports:
+        - containerPort: 8501
+        # Injects the Kubernetes service address into the code
+        env:
+        - name: API_URL
+          value: "http://backend-service:8000"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-service
+spec:
+  type: LoadBalancer # Exposes the frontend to your local machine (localhost:8501)
+  selector:
+    app: rag-frontend
+  ports:
+    - protocol: TCP
+      port: 8501
+      targetPort: 8501

@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nextwork-rag-backend
+  labels:
+    app: rag-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rag-backend
+  template:
+    metadata:
+      labels:
+        app: rag-backend
+    spec:
+      containers:
+      - name: backend
+        image: toufeeqparker2004/nextwork-rag-backend:v1
+        ports:
+        - containerPort: 8000
+        # This tells your Python code where the Ollama pod is living
+        env:
+        - name: OLLAMA_HOST
+          value: "http://ollama-service:11434"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-service
+spec:
+  selector:
+    app: rag-backend
+  ports:
+    - protocol: TCP
+      port: 8000
+      targetPort: 8000
+  # ClusterIP is best for backends because they don't need to be 
+  # directly public; only the frontend needs to talk to them.
+  type: ClusterIP
