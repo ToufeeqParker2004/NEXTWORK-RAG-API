@@ -1,0 +1,24 @@
+# Exclude Large Data Folders (Crucial for RAG)
+chroma_db/
+db/
+*.parquet
+*.sqlite3
+
+# Exclude Python heavyweights
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+env/
+.env
+
+# Exclude Git and IDE settings
+.git
+.github
+.vscode
+.idea
+.DS_Store
+
+# Exclude local logs
+*.log
