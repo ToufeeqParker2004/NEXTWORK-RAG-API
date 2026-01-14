@@ -2,7 +2,7 @@ name: Build and Deploy RAG Project
 
 on:
   push:
-    branches: [ "main" ] # Triggers whenever you push to main
+    branches: [ "main" ] # Triggers whenever you push to the main branch
 
 jobs:
   build-and-push:
@@ -11,17 +11,22 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # 1. Setup Docker Buildx (Highly recommended for sub-directory builds)
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # 2. Log in to Docker Hub
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }} # Use your Personal Access Token here
+          password: ${{ secrets.DOCKER_PASSWORD }} # Use your Personal Access Token (PAT)
 
       # --- BACKEND SECTION ---
       - name: Build and Push Backend
         uses: docker/build-push-action@v5
         with:
-          context: ./backend # Looks inside your backend folder
+          context: ./backend      # <--- FIX: This tells Docker to look INSIDE the backend folder
           push: true
           tags: ${{ secrets.DOCKER_USERNAME }}/nextwork-rag-backend:latest
 
@@ -29,11 +34,12 @@ jobs:
       - name: Build and Push Frontend
         uses: docker/build-push-action@v5
         with:
-          context: ./frontend # Looks inside your frontend folder
+          context: ./frontend     # <--- FIX: This tells Docker to look INSIDE the frontend folder
           push: true
           tags: ${{ secrets.DOCKER_USERNAME }}/nextwork-rag-frontend:latest
 
       # --- DEPLOYMENT SECTION ---
+      # This "pings" Render to pull the fresh images we just pushed
       - name: Trigger Backend Render Deploy
         run: curl "${{ secrets.RENDER_BACKEND_DEPLOY_HOOK }}"
 
