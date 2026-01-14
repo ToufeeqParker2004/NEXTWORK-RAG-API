@@ -4,9 +4,21 @@ from pydantic import BaseModel
 import chromadb
 from chromadb.utils import embedding_functions
 from groq import Groq
+from fastapi.middleware.cors import CORSMiddleware
+
 
 # 1. Initialize FastAPI app
 app = FastAPI(title="RAG API with Groq")
+
+# Add this immediately after your 'app = FastAPI(...)' line
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # Allows all origins. For better security later, replace "*" with your frontend's URL.
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 # 2. Initialize Groq Client
 # Ensure you have set GROQ_API_KEY in your environment or GitHub Secrets
