@@ -2,39 +2,43 @@ import streamlit as st
 import requests
 import os
 
-
 # 1. Setup the page
 st.set_page_config(page_title="RAG AI Assistant", page_icon="🤖")
 st.title("🤖 My RAG Knowledge Base")
 
 # Define the API endpoints
-# Change from http://127.0.0.1:8000 to the Docker service name
+# Defaults to localhost if API_URL environment variable isn't set in Render
 API_URL = os.getenv("API_URL", "http://localhost:8000")
 QUERY_URL = f"{API_URL}/query"
 ADD_URL = f"{API_URL}/add"
 
-# --- SIDEBAR: ADD KNOWLEDGE ---
+# --- SIDEBAR: UPLOAD DOCUMENTS ---
 with st.sidebar:
     st.header("🧠 Expand Knowledge")
-    st.write("Paste new technical docs or notes below to add them to ChromaDB.")
+    st.write("Upload PDF or Word documents to add them to your knowledge base.")
     
-    new_doc = st.text_area("Content to add:", placeholder="e.g., Docker is a platform for...")
+    # Updated to accept files instead of just text
+    uploaded_file = st.file_uploader("Choose a file", type=["pdf", "docx"])
     
-    if st.button("Add to Knowledge Base"):
-        if new_doc.strip():
+    if st.button("Index Document"):
+        if uploaded_file:
             try:
-                # Sending the text to your @app.post("/add") endpoint
-                response = requests.post(f"{ADD_URL}?text={new_doc}")
+                with st.spinner(f"Processing {uploaded_file.name}..."):
+                    # Prepare the file for the multipart/form-data request
+                    files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
+                    
+                    # Sending the file to your updated @app.post("/add") endpoint
+                    response = requests.post(ADD_URL, files=files)
                 
                 if response.status_code == 200:
                     result = response.json()
-                    st.success(f"Added! ID: {result.get('id')}")
+                    st.success(f"Success! {result.get('message')}")
                 else:
-                    st.error(f"Failed: {response.status_code}")
+                    st.error(f"Failed to index: {response.json().get('detail', 'Unknown error')}")
             except Exception as e:
                 st.error(f"Error connecting to API: {e}")
         else:
-            st.warning("Please enter some text first.")
+            st.warning("Please select a file first.")
 
 # --- MAIN CHAT INTERFACE ---
 if "messages" not in st.session_state:
@@ -51,12 +55,12 @@ if prompt := st.chat_input("Ask a question..."):
     try:
         with st.spinner("Searching and generating..."):
             # Calling your @app.post("/query") endpoint
-            response = requests.post(f"{QUERY_URL}?q={prompt}")
+            response = requests.post(QUERY_URL, params={"q": prompt})
             
             if response.status_code == 200:
                 answer = response.json().get("answer", "No answer found.")
             else:
-                answer = "Error: Could not reach the API."
+                answer = f"Error: {response.status_code} - Could not reach the API."
     except Exception as e:
         answer = f"Connection Error: {e}"
 

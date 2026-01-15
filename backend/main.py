@@ -1,93 +1,108 @@
 import os
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from pydantic import BaseModel
 import chromadb
 from chromadb.utils import embedding_functions
 from groq import Groq
 from fastapi.middleware.cors import CORSMiddleware
-
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+import fitz  # PyMuPDF for PDFs
+import docx  # for Word files
+from io import BytesIO
 
 # 1. Initialize FastAPI app
 app = FastAPI(title="RAG API with Groq")
 
-# Add this immediately after your 'app = FastAPI(...)' line
+# Enable CORS for frontend communication
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Allows all origins. For better security later, replace "*" with your frontend's URL.
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
-# 2. Initialize Groq Client
-# Ensure you have set GROQ_API_KEY in your environment or GitHub Secrets
+# 2. Initialize Clients (Groq and Voyage AI)
+# Ensure VOYAGE_API_KEY and GROQ_API_KEY are in Render Environment Variables
 groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
-# 3. Setup ChromaDB (Your Knowledge Base)
-# This persists your data even if the container restarts
-client = chromadb.PersistentClient(path="./chroma_db")
-sentence_transformer_ef = embedding_functions.SentenceTransformerEmbeddingFunction(
-    model_name="sentence-transformers/paraphrase-MiniLM-L3-v2"
+# Using an API-based embedding function to save memory
+voyage_ef = embedding_functions.VoyageAIEmbeddingFunction(
+    api_key=os.environ.get("VOYAGE_API_KEY"),
+    model_name="voyage-2"
 )
 
+# 3. Setup ChromaDB and Text Splitter
+client = chromadb.PersistentClient(path="./chroma_db")
 collection = client.get_or_create_collection(
     name="my_knowledge_base",
-    embedding_function=sentence_transformer_ef
+    embedding_function=voyage_ef
 )
 
-# 4. Data Models for API
-class QueryRequest(BaseModel):
-    question: str
+# Smart chunking to improve AI accuracy
+text_splitter = RecursiveCharacterTextSplitter(
+    chunk_size=1000,
+    chunk_overlap=200,
+    separators=["\n\n", "\n", " ", ""]
+)
 
-# 5. API Endpoints
+# 4. API Endpoints
 
 @app.get("/")
 def home():
-    return {"message": "RAG API is running with Groq!"}
+    return {"message": "RAG API is running with Groq and Voyage AI!"}
 
 @app.post("/add")
-def add_to_knowledge(text: str):
-    """Adds a new document to the vector database."""
+async def add_document(file: UploadFile = File(...)):
+    """Accepts PDF/DOCX, chunks text, and indexes in ChromaDB."""
+    text_content = ""
+    file_extension = os.path.splitext(file.filename)[1].lower()
+
     try:
-        # Generate a simple unique ID based on collection count
-        doc_id = str(collection.count() + 1)
-        collection.add(
-            documents=[text],
-            ids=[doc_id]
-        )
-        return {"message": "Document added successfully", "id": doc_id}
+        # Extract text based on file type
+        if file_extension == ".pdf":
+            pdf_bytes = await file.read()
+            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+            text_content = "\n".join([page.get_text() for page in doc])
+        elif file_extension == ".docx":
+            docx_bytes = await file.read()
+            doc = docx.Document(BytesIO(docx_bytes))
+            text_content = "\n".join([para.text for para in doc.paragraphs])
+        else:
+            raise HTTPException(status_code=400, detail="Use .pdf or .docx only.")
+
+        # Chunk the text
+        chunks = text_splitter.split_text(text_content)
+        
+        # Add chunks to ChromaDB
+        for i, chunk in enumerate(chunks):
+            chunk_id = f"{file.filename}_chunk_{i}"
+            collection.add(
+                documents=[chunk],
+                ids=[chunk_id],
+                metadatas=[{"filename": file.filename, "chunk_index": i}]
+            )
+            
+        return {"message": f"Successfully indexed {len(chunks)} chunks from {file.filename}"}
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Indexing Error: {str(e)}")
 
 @app.post("/query")
 def query_knowledge(q: str):
-    """Retrieves context from ChromaDB and generates an answer using Groq."""
+    """Retrieves chunks and generates an answer using Groq."""
     try:
-        # STEP 1: Retrieval - Find the most relevant context in ChromaDB
-        results = collection.query(
-            query_texts=[q],
-            n_results=2
-        )
-        
-        # Flatten the retrieved documents into a single string
+        results = collection.query(query_texts=[q], n_results=3)
         context = " ".join(results['documents'][0]) if results['documents'] else "No context found."
 
-        # STEP 2: Augmentation & Generation - Send context + question to Groq
         prompt = f"Answer the following question using ONLY the provided context.\n\nContext: {context}\n\nQuestion: {q}"
         
         chat_completion = groq_client.chat.completions.create(
             messages=[
-                {
-                    "role": "system",
-                    "content": "You are a helpful assistant that answers questions based on provided documents."
-                },
-                {
-                    "role": "user",
-                    "content": prompt,
-                }
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": prompt}
             ],
-            model="llama-3.3-70b-versatile", # High-performance model
+            model="llama-3.3-70b-versatile",
         )
 
         return {
@@ -96,12 +111,9 @@ def query_knowledge(q: str):
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Groq/Chroma Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
-    # 1. Get the PORT from Render's environment, defaulting to 8000 for local testing
     port = int(os.environ.get("PORT", 8000))
-    
-    # 2. Run uvicorn using the dynamic port
     uvicorn.run(app, host="0.0.0.0", port=port)
