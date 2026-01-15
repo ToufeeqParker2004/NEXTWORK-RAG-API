@@ -6,39 +6,40 @@ import os
 st.set_page_config(page_title="RAG AI Assistant", page_icon="🤖")
 st.title("🤖 My RAG Knowledge Base")
 
-# Define the API endpoints
-# Defaults to localhost if API_URL environment variable isn't set in Render
+# Define API URLs
 API_URL = os.getenv("API_URL", "http://localhost:8000")
 QUERY_URL = f"{API_URL}/query"
 ADD_URL = f"{API_URL}/add"
 
-# --- SIDEBAR: UPLOAD DOCUMENTS ---
+# --- SIDEBAR: ADD KNOWLEDGE ---
 with st.sidebar:
     st.header("🧠 Expand Knowledge")
-    st.write("Upload PDF or Word documents to add them to your knowledge base.")
     
-    # Updated to accept files instead of just text
-    uploaded_file = st.file_uploader("Choose a file", type=["pdf", "docx"])
+    # Input Method 1: File Upload
+    uploaded_file = st.file_uploader("Upload a document", type=["pdf", "docx"])
     
-    if st.button("Index Document"):
-        if uploaded_file:
-            try:
-                with st.spinner(f"Processing {uploaded_file.name}..."):
-                    # Prepare the file for the multipart/form-data request
+    # Input Method 2: Text Area
+    new_doc_text = st.text_area("OR Paste text below:", placeholder="Enter technical notes...")
+    
+    if st.button("Add to Knowledge Base"):
+        try:
+            with st.spinner("Indexing content..."):
+                if uploaded_file:
                     files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
-                    
-                    # Sending the file to your updated @app.post("/add") endpoint
                     response = requests.post(ADD_URL, files=files)
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    st.success(f"Success! {result.get('message')}")
+                elif new_doc_text.strip():
+                    # Send text as Form Data to match backend expectations
+                    response = requests.post(ADD_URL, data={"text": new_doc_text})
                 else:
-                    st.error(f"Failed to index: {response.json().get('detail', 'Unknown error')}")
-            except Exception as e:
-                st.error(f"Error connecting to API: {e}")
-        else:
-            st.warning("Please select a file first.")
+                    st.warning("Please provide a file or text.")
+                    st.stop()
+
+                if response.status_code == 200:
+                    st.success(response.json().get("message", "Success!"))
+                else:
+                    st.error(f"Error: {response.json().get('detail')}")
+        except Exception as e:
+            st.error(f"Connection Error: {e}")
 
 # --- MAIN CHAT INTERFACE ---
 if "messages" not in st.session_state:
@@ -48,19 +49,17 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-if prompt := st.chat_input("Ask a question..."):
+if prompt := st.chat_input("Ask a question about your documents..."):
     st.chat_message("user").markdown(prompt)
     st.session_state.messages.append({"role": "user", "content": prompt})
 
     try:
-        with st.spinner("Searching and generating..."):
-            # Calling your @app.post("/query") endpoint
+        with st.spinner("Searching knowledge base..."):
             response = requests.post(QUERY_URL, params={"q": prompt})
-            
             if response.status_code == 200:
-                answer = response.json().get("answer", "No answer found.")
+                answer = response.json().get("answer", "No answer generated.")
             else:
-                answer = f"Error: {response.status_code} - Could not reach the API."
+                answer = "Error: Backend is currently unavailable."
     except Exception as e:
         answer = f"Connection Error: {e}"
 

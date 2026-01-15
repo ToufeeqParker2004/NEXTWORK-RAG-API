@@ -1,5 +1,5 @@
 import os
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 import chromadb
 from chromadb.utils import embedding_functions
@@ -9,9 +9,10 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 import fitz  # PyMuPDF for PDFs
 import docx  # for Word files
 from io import BytesIO
+from typing import Optional
 
 # 1. Initialize FastAPI app
-app = FastAPI(title="RAG API with Groq")
+app = FastAPI(title="RAG API with Groq and Voyage AI")
 
 # Enable CORS for frontend communication
 app.add_middleware(
@@ -22,11 +23,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 2. Initialize Clients (Groq and Voyage AI)
-# Ensure VOYAGE_API_KEY and GROQ_API_KEY are in Render Environment Variables
+# 2. Initialize Clients
+# Make sure VOYAGE_API_KEY and GROQ_API_KEY are in Render Environment Variables
 groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
-# Using an API-based embedding function to save memory
+# API-based embedding saves 300MB+ of RAM compared to local models
 voyage_ef = embedding_functions.VoyageAIEmbeddingFunction(
     api_key=os.environ.get("VOYAGE_API_KEY"),
     model_name="voyage-2"
@@ -39,7 +40,6 @@ collection = client.get_or_create_collection(
     embedding_function=voyage_ef
 )
 
-# Smart chunking to improve AI accuracy
 text_splitter = RecursiveCharacterTextSplitter(
     chunk_size=1000,
     chunk_overlap=200,
@@ -50,47 +50,58 @@ text_splitter = RecursiveCharacterTextSplitter(
 
 @app.get("/")
 def home():
-    return {"message": "RAG API is running with Groq and Voyage AI!"}
+    return {"message": "RAG API is live with Hybrid Uploads!"}
 
 @app.post("/add")
-async def add_document(file: UploadFile = File(...)):
-    """Accepts PDF/DOCX, chunks text, and indexes in ChromaDB."""
+async def add_to_knowledge(
+    file: Optional[UploadFile] = File(None), 
+    text: Optional[str] = Form(None)
+):
+    """Accepts either an uploaded file OR a text string."""
     text_content = ""
-    file_extension = os.path.splitext(file.filename)[1].lower()
+    source_name = ""
 
     try:
-        # Extract text based on file type
-        if file_extension == ".pdf":
-            pdf_bytes = await file.read()
-            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-            text_content = "\n".join([page.get_text() for page in doc])
-        elif file_extension == ".docx":
-            docx_bytes = await file.read()
-            doc = docx.Document(BytesIO(docx_bytes))
-            text_content = "\n".join([para.text for para in doc.paragraphs])
-        else:
-            raise HTTPException(status_code=400, detail="Use .pdf or .docx only.")
+        # Priority 1: Check for Text Paste
+        if text and text.strip():
+            text_content = text
+            source_name = f"manual_entry_{collection.count() + 1}"
 
-        # Chunk the text
-        chunks = text_splitter.split_text(text_content)
+        # Priority 2: Check for File Upload
+        elif file:
+            source_name = file.filename
+            file_extension = os.path.splitext(file.filename)[1].lower()
+            
+            if file_extension == ".pdf":
+                pdf_bytes = await file.read()
+                doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+                text_content = "\n".join([page.get_text() for page in doc])
+            elif file_extension == ".docx":
+                docx_bytes = await file.read()
+                doc = docx.Document(BytesIO(docx_bytes))
+                text_content = "\n".join([para.text for para in doc.paragraphs])
+            else:
+                raise HTTPException(status_code=400, detail="Unsupported file format.")
         
-        # Add chunks to ChromaDB
+        else:
+            raise HTTPException(status_code=400, detail="No content provided.")
+
+        # Chunk and Index
+        chunks = text_splitter.split_text(text_content)
         for i, chunk in enumerate(chunks):
-            chunk_id = f"{file.filename}_chunk_{i}"
             collection.add(
                 documents=[chunk],
-                ids=[chunk_id],
-                metadatas=[{"filename": file.filename, "chunk_index": i}]
+                ids=[f"{source_name}_chunk_{i}"],
+                metadatas=[{"source": source_name}]
             )
             
-        return {"message": f"Successfully indexed {len(chunks)} chunks from {file.filename}"}
+        return {"message": f"Successfully indexed {len(chunks)} chunks from {source_name}"}
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Indexing Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/query")
 def query_knowledge(q: str):
-    """Retrieves chunks and generates an answer using Groq."""
     try:
         results = collection.query(query_texts=[q], n_results=3)
         context = " ".join(results['documents'][0]) if results['documents'] else "No context found."
@@ -99,7 +110,7 @@ def query_knowledge(q: str):
         
         chat_completion = groq_client.chat.completions.create(
             messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "system", "content": "You are a precise assistant."},
                 {"role": "user", "content": prompt}
             ],
             model="llama-3.3-70b-versatile",
@@ -109,9 +120,8 @@ def query_knowledge(q: str):
             "answer": chat_completion.choices[0].message.content,
             "context_used": context
         }
-
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn
