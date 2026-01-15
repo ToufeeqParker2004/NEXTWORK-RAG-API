@@ -27,7 +27,9 @@ groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 # 3. Setup ChromaDB (Your Knowledge Base)
 # This persists your data even if the container restarts
 client = chromadb.PersistentClient(path="./chroma_db")
-sentence_transformer_ef = embedding_functions.SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+sentence_transformer_ef = embedding_functions.SentenceTransformerEmbeddingFunction(
+    model_name="sentence-transformers/paraphrase-MiniLM-L3-v2"
+)
 
 collection = client.get_or_create_collection(
     name="my_knowledge_base",
