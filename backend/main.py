@@ -24,10 +24,9 @@ app.add_middleware(
 )
 
 # 2. Initialize Clients
-# Make sure VOYAGE_API_KEY and GROQ_API_KEY are in Render Environment Variables
 groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
-# API-based embedding saves 300MB+ of RAM compared to local models
+# API-based embedding function (Voyage AI)
 voyage_ef = embedding_functions.VoyageAIEmbeddingFunction(
     api_key=os.environ.get("VOYAGE_API_KEY"),
     model_name="voyage-2"
@@ -50,14 +49,14 @@ text_splitter = RecursiveCharacterTextSplitter(
 
 @app.get("/")
 def home():
-    return {"message": "RAG API is live with Hybrid Uploads!"}
+    return "OK"  # Minimal response for Cron-job.org compatibility
 
 @app.post("/add")
 async def add_to_knowledge(
     file: Optional[UploadFile] = File(None), 
     text: Optional[str] = Form(None)
 ):
-    """Accepts either an uploaded file OR a text string."""
+    """Accepts either an uploaded file OR a text string and batches chunks."""
     text_content = ""
     source_name = ""
 
@@ -86,13 +85,27 @@ async def add_to_knowledge(
         else:
             raise HTTPException(status_code=400, detail="No content provided.")
 
-        # Chunk and Index
+        # --- BATCHING SOLUTION ---
+        # 1. Split text into chunks
         chunks = text_splitter.split_text(text_content)
+        
+        # 2. Prepare lists for batching
+        all_documents = []
+        all_ids = []
+        all_metadatas = []
+
+        # 3. Consolidate chunks into lists
         for i, chunk in enumerate(chunks):
+            all_documents.append(chunk)
+            all_ids.append(f"{source_name}_chunk_{i}")
+            all_metadatas.append({"source": source_name})
+
+        # 4. Perform ONE single batch operation to stay under rate limits
+        if all_documents:
             collection.add(
-                documents=[chunk],
-                ids=[f"{source_name}_chunk_{i}"],
-                metadatas=[{"source": source_name}]
+                documents=all_documents,
+                ids=all_ids,
+                metadatas=all_metadatas
             )
             
         return {"message": f"Successfully indexed {len(chunks)} chunks from {source_name}"}
@@ -102,6 +115,7 @@ async def add_to_knowledge(
 
 @app.post("/query")
 def query_knowledge(q: str):
+    """Retrieves context and generates an answer using Groq."""
     try:
         results = collection.query(query_texts=[q], n_results=3)
         context = " ".join(results['documents'][0]) if results['documents'] else "No context found."
